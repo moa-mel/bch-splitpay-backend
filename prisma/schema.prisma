@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum GroupStatus {
+  OPEN
+  FUNDED
+  SETTLED
+  CANCELLED
+}
+
+model Group {
+  id              String         @id @default(cuid())
+  name            String
+  description     String?
+  targetAmount    Decimal        @db.Decimal(18, 8)
+  currency        String         @default("BCH")
+  status          GroupStatus    @default(OPEN)
+  creatorAddress  String?
+  contributions   Contribution[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model Contribution {
+  id              String   @id @default(cuid())
+  groupId         String
+  contributor     String
+  amount          Decimal  @db.Decimal(18, 8)
+  transactionId   String?
+  confirmed       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  group           Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+}
