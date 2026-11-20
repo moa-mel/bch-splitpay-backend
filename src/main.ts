@@ -13,7 +13,7 @@ async function bootstrap() {
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:5173',
-    '',
+    'https://bch-split-pay-frontend.onrender.com',
     process.env.FRONTEND_URL,
   ].filter((origin): origin is string => Boolean(origin));
 
