@@ -1,22 +1,47 @@
-import { ValidationPipe } from '@nestjs/common';
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { BigIntSerializerInterceptor } from './common/interceptors/bigint-serializer.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix('api/v1');
-  app.enableCors({
-    origin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000',
-  });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
+
+  app.useGlobalInterceptors(
+    new BigIntSerializerInterceptor(),
   );
-  const port = Number(process.env.PORT ?? 3001);
-  await app.listen(port);
-  console.log(`SplitPay API listening at http://localhost:${port}/api/v1`);
+
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    '',
+    process.env.FRONTEND_URL,
+  ].filter((origin): origin is string => Boolean(origin));
+
+  app.enableCors({
+    origin: allowedOrigins,
+    methods: [
+      'GET',
+      'HEAD',
+      'POST',
+      'PUT',
+      'PATCH',
+      'DELETE',
+      'OPTIONS',
+    ],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'Origin',
+      'x-merchant-id',
+    ],
+    credentials: true,
+    optionsSuccessStatus: 204,
+  });
+
+  app.setGlobalPrefix('api/v1');
+
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
+
 bootstrap();
