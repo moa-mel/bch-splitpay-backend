@@ -14,7 +14,7 @@ export class CreateGroupDto {
   @Min(0.00000001)
   targetAmount: number;
 
-  @IsOptional()
   @IsString()
-  creatorAddress?: string;
+  @MaxLength(120)
+  creatorAddress: string;
 }

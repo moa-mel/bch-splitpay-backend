@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsNumber, IsString, Matches, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsNumber, IsString, Matches, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class RecipientDto {
@@ -20,6 +20,7 @@ export class PreviewSplitDto {
   totalAmount: number;
 
   @IsArray()
+  @ArrayMaxSize(2)
   @ArrayMinSize(2)
   @ValidateNested({ each: true })
   @Type(() => RecipientDto)

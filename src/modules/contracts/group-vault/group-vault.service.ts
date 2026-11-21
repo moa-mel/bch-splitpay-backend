@@ -1,12 +1,19 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+
 import {
   CreateGroupVaultInput,
   PreparedGroupVault,
   prepareGroupVault,
 } from './group-vault.types';
 
+import { CashScriptService } from '../cashscript.service';
+
 @Injectable()
 export class GroupVaultService {
+  constructor(
+    private readonly cashScript: CashScriptService,
+  ) {}
+
   prepare(input: CreateGroupVaultInput): PreparedGroupVault {
     try {
       return prepareGroupVault(input);
@@ -19,18 +26,23 @@ export class GroupVaultService {
     }
   }
 
-  toResponse(plan: PreparedGroupVault) {
-    return {
-      contract: 'GroupVault',
-      groupId: plan.groupId,
-      status: 'PREPARATION_ONLY',
-      targetSatoshis: plan.targetSatoshis.toString(),
-      minerFeeSatoshis: plan.minerFeeSatoshis.toString(),
-      requiredFundingSatoshis:
-        plan.requiredFundingSatoshis.toString(),
+  async getContractAddress(plan: PreparedGroupVault) {
+    return this.cashScript.execute<{
+      network: string;
+      contractAddress: string;
+    }>('prepare-group', {
       beneficiaryAddress: plan.beneficiaryAddress,
-      message:
-        'GroupVault settlement preparation completed. On-chain funding and settlement have not been performed.',
-    };
+      targetSatoshis: plan.targetSatoshis.toString(),
+    });
+  }
+
+  async settle(plan: PreparedGroupVault) {
+    return this.cashScript.execute<{
+      transactionId: string;
+      status: string;
+    }>('execute-group', {
+      beneficiaryAddress: plan.beneficiaryAddress,
+      targetSatoshis: plan.targetSatoshis.toString(),
+    });
   }
 }

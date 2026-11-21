@@ -50,4 +50,44 @@ export class TransactionVerifierService {
         confirmations > 0 ? 'CONFIRMED' : 'UNCONFIRMED',
     };
   }
+
+  async verifyPaymentOutput(
+  transactionId: string,
+  expectedAddress: string,
+  expectedSatoshis: bigint,
+) {
+  const transaction = await this.verify(transactionId);
+
+  const raw = await this.networkProvider.call<{
+    vout: Array<{
+      value: number;
+      scriptPubKey: {
+        address?: string;
+        addresses?: string[];
+      };
+    }>;
+  }>('getrawtransaction', [transactionId, true]);
+
+  const paidSatoshis = raw.vout.reduce((sum, output) => {
+    const addresses = [
+      output.scriptPubKey.address,
+      ...(output.scriptPubKey.addresses ?? []),
+    ].filter(Boolean);
+
+    if (!addresses.includes(expectedAddress)) {
+      return sum;
+    }
+
+    return sum + BigInt(
+      Math.round(output.value * 100_000_000),
+    );
+  }, 0n);
+
+  return {
+    ...transaction,
+    expectedSatoshis: expectedSatoshis.toString(),
+    paidSatoshis: paidSatoshis.toString(),
+    paymentMatches: paidSatoshis === expectedSatoshis,
+  };
+}
 }

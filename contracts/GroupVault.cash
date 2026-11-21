@@ -1,3 +1,4 @@
+
 pragma cashscript ^0.14.0;
 
 contract GroupVault(
@@ -7,17 +8,28 @@ contract GroupVault(
     function settle() {
         require(targetAmount > 546);
 
-        require(tx.inputs.length == 1);
-        require(tx.outputs.length == 1);
+        // Limit the number of inputs to keep script execution bounded.
+        require(tx.inputs.length >= 1);
+        require(tx.inputs.length <= 10);
 
         int minerFee = 1000;
+        int totalInputValue = 0;
 
-        int contractBalance =
-            tx.inputs[this.activeInputIndex].value;
+        // All inputs must belong to this same GroupVault.
+        for (int i = 0; i < tx.inputs.length; i++) {
+            require(
+                tx.inputs[i].lockingBytecode ==
+                tx.inputs[this.activeInputIndex].lockingBytecode
+            );
+
+            totalInputValue += tx.inputs[i].value;
+        }
 
         require(
-            contractBalance == targetAmount + minerFee
+            totalInputValue == targetAmount + minerFee
         );
+
+        require(tx.outputs.length == 1);
 
         bytes25 beneficiaryLockingBytecode =
             new LockingBytecodeP2PKH(beneficiary);

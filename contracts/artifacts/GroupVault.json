@@ -7,21 +7,24 @@
   "abi": [
     { "name": "settle", "inputs": [] }
   ],
-  "bytecode": "OP_OVER 2202 OP_GREATERTHAN OP_VERIFY OP_TXINPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_1 OP_NUMEQUALVERIFY e803 OP_INPUTINDEX OP_UTXOVALUE OP_3 OP_PICK OP_ROT OP_ADD OP_NUMEQUALVERIFY 76a914 OP_SWAP OP_CAT 88ac OP_CAT OP_0 OP_OUTPUTBYTECODE OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_NUMEQUAL",
-  "source": "pragma cashscript ^0.14.0;\n\ncontract GroupVault(\n    bytes20 beneficiary,\n    int targetAmount\n) {\n    function settle() {\n        require(targetAmount > 546);\n\n        require(tx.inputs.length == 1);\n        require(tx.outputs.length == 1);\n\n        int minerFee = 1000;\n\n        int contractBalance =\n            tx.inputs[this.activeInputIndex].value;\n\n        require(\n            contractBalance == targetAmount + minerFee\n        );\n\n        bytes25 beneficiaryLockingBytecode =\n            new LockingBytecodeP2PKH(beneficiary);\n\n        require(\n            tx.outputs[0].lockingBytecode ==\n            beneficiaryLockingBytecode\n        );\n\n        require(tx.outputs[0].value == targetAmount);\n    }\n}",
-  "fingerprint": "74f86ae347a179e27c03603ba5d2e58fc66cde7a0ab81b61263eab8ef2918e66",
+  "bytecode": "OP_OVER 2202 OP_GREATERTHAN OP_VERIFY OP_TXINPUTCOUNT OP_1 OP_GREATERTHANOREQUAL OP_VERIFY OP_TXINPUTCOUNT OP_10 OP_LESSTHANOREQUAL OP_VERIFY e803 OP_0 OP_0 OP_BEGIN OP_DUP OP_TXINPUTCOUNT OP_LESSTHAN OP_DUP OP_TOALTSTACK OP_IF OP_DUP OP_UTXOBYTECODE OP_INPUTINDEX OP_UTXOBYTECODE OP_EQUALVERIFY OP_2DUP OP_UTXOVALUE OP_ADD OP_ROT OP_DROP OP_SWAP OP_1ADD OP_ENDIF OP_FROMALTSTACK OP_NOT OP_UNTIL OP_DROP OP_3 OP_PICK OP_ROT OP_ADD OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_1 OP_NUMEQUALVERIFY 76a914 OP_SWAP OP_CAT 88ac OP_CAT OP_0 OP_OUTPUTBYTECODE OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_NUMEQUAL",
+  "source": "\npragma cashscript ^0.14.0;\n\ncontract GroupVault(\n    bytes20 beneficiary,\n    int targetAmount\n) {\n    function settle() {\n        require(targetAmount > 546);\n\n        // Limit the number of inputs to keep script execution bounded.\n        require(tx.inputs.length >= 1);\n        require(tx.inputs.length <= 10);\n\n        int minerFee = 1000;\n        int totalInputValue = 0;\n\n        // All inputs must belong to this same GroupVault.\n        for (int i = 0; i < tx.inputs.length; i++) {\n            require(\n                tx.inputs[i].lockingBytecode ==\n                tx.inputs[this.activeInputIndex].lockingBytecode\n            );\n\n            totalInputValue += tx.inputs[i].value;\n        }\n\n        require(\n            totalInputValue == targetAmount + minerFee\n        );\n\n        require(tx.outputs.length == 1);\n\n        bytes25 beneficiaryLockingBytecode =\n            new LockingBytecodeP2PKH(beneficiary);\n\n        require(\n            tx.outputs[0].lockingBytecode ==\n            beneficiaryLockingBytecode\n        );\n\n        require(tx.outputs[0].value == targetAmount);\n    }\n}\n",
+  "fingerprint": "9d4cfee4cde7f8ef7b4ed4f9da76b1b072b5e50e77e77ff7bab119b9904662d8",
   "debug": {
-    "bytecode": "78022202a069c3519dc4519d02e803c0c653797b939d0376a9147c7e0288ac7e00cd8800cc9c",
-    "sourceMap": "8:16:8:28;:31::34;:16:::1;:8::36;10:16:10:32:0;:36::37;:8::39:1;11:16:11:33:0;:37::38;:8::40:1;13:23:13:27:0;16:22:16:43;:12::50:1;19:31:19:43:0;;:46::54;:31:::1;18:8:20:10;23:12:23:49:0;:37::48;:12::49:1;;;26:23:26:24:0;:12::41:1;25:8:28:10;30:27:30:28:0;:16::35:1;:8::53",
+    "bytecode": "78022202a069c351a269c35aa16902e80300006576c39f766b6376c7c0c7886ec6937b757c8b686c91667553797b939dc4519d0376a9147c7e0288ac7e00cd8800cc9c",
+    "sourceMap": "9:16:9:28;:31::34;:16:::1;:8::36;12:16:12:32:0;:36::37;:16:::1;:8::39;13:16:13:32:0;:36::38;:16:::1;:8::40;15:23:15:27:0;16:30:16:31;19:21:19:22;:8:26:9;:24:19:25;:28::44;:24:::1;;;:51:26:9:0;21:26:21:27;:16::44:1;22:26:22:47:0;:16::64:1;20:12:23:14;25::25:42:0;:31::49:1;:12;:::50;;;19:46:19:49;:51:26:9;;:8;;;29:31:29:43:0;;:46::54;:31:::1;28:8:30:10;32:16:32:33:0;:37::38;:8::40:1;35:12:35:49:0;:37::48;:12::49:1;;;38:23:38:24:0;:12::41:1;37:8:40:10;42:27:42:28:0;:16::35:1;:8::53",
     "logs": [],
     "requires": [
-      { "ip": 5, "line": 8 },
-      { "ip": 8, "line": 10 },
-      { "ip": 11, "line": 11 },
-      { "ip": 19, "line": 18 },
-      { "ip": 27, "line": 25 },
-      { "ip": 31, "line": 30 }
-    ]
+      { "ip": 5, "line": 9 },
+      { "ip": 9, "line": 12 },
+      { "ip": 13, "line": 13 },
+      { "ip": 28, "line": 20 },
+      { "ip": 45, "line": 28 },
+      { "ip": 48, "line": 32 },
+      { "ip": 56, "line": 37 },
+      { "ip": 60, "line": 42 }
+    ],
+    "sourceTags": "33:33:fu;34:37:lc;38:38:sc"
   },
   "compiler": {
     "name": "cashc",
@@ -31,5 +34,5 @@
       "enforceLocktimeGuard": true
     }
   },
-  "updatedAt": "2026-11-21T07:46:04.093Z"
+  "updatedAt": "2026-11-21T08:09:38.930Z"
 }

@@ -1,4 +1,10 @@
-import { IsNumber, IsOptional, IsString, Min, MaxLength } from 'class-validator';
+import {
+  IsNumber,
+  IsString,
+  Min,
+  MaxLength,
+  Matches,
+} from 'class-validator';
 
 export class CreateContributionDto {
   @IsString()
@@ -9,7 +15,7 @@ export class CreateContributionDto {
   @Min(0.00000001)
   amount: number;
 
-  @IsOptional()
   @IsString()
-  transactionId?: string;
+  @Matches(/^[a-fA-F0-9]{64}$/)
+  transactionId: string;
 }
