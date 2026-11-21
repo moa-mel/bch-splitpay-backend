@@ -1,3 +1,4 @@
+
 import {
   Injectable,
   BadRequestException,
@@ -20,10 +21,11 @@ export class TransactionService {
       );
     }
 
-    const transactionId = await this.networkProvider.call<string>(
-      'sendrawtransaction',
-      [rawTransactionHex],
-    );
+    const transactionId =
+      await this.networkProvider.call<string>(
+        'sendrawtransaction',
+        [rawTransactionHex],
+      );
 
     return {
       transactionId,
