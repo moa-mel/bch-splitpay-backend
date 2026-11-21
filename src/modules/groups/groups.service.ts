@@ -26,7 +26,7 @@ export class GroupsService {
     private readonly prisma: PrismaService,
     private readonly groupVault: GroupVaultService,
     private readonly verifier: TransactionVerifierService,
-  ) {}
+  ) { }
 
   async create(dto: CreateGroupDto) {
     if (!dto.creatorAddress) {
@@ -64,8 +64,8 @@ export class GroupsService {
     };
   }
 
-  list() {
-    return this.prisma.group.findMany({
+  async list() {
+    const groups = await this.prisma.group.findMany({
       include: {
         contributions: true,
       },
@@ -73,6 +73,31 @@ export class GroupsService {
         createdAt: 'desc',
       },
     });
+
+    return Promise.all(
+      groups.map(async (group) => {
+        if (!group.creatorAddress) {
+          return group;
+        }
+
+        const plan = this.groupVault.prepare({
+          groupId: group.id,
+          targetAmountBch: group.targetAmount.toString(),
+          beneficiaryAddress: group.creatorAddress,
+        });
+
+        const contract =
+          await this.groupVault.getContractAddress(plan);
+
+        return {
+          ...group,
+          vaultAddress: contract.contractAddress,
+          network: contract.network,
+          requiredFundingSatoshis:
+            plan.requiredFundingSatoshis.toString(),
+        };
+      }),
+    );
   }
 
   async addContribution(
