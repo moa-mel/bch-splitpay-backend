@@ -1,0 +1,41 @@
+{
+  "contractName": "SplitRouter",
+  "constructorInputs": [
+    { "name": "recipient1", "type": "bytes20" },
+    { "name": "amount1", "type": "int" },
+    { "name": "recipient2", "type": "bytes20" },
+    { "name": "amount2", "type": "int" }
+  ],
+  "abi": [
+    { "name": "distribute", "inputs": [] }
+  ],
+  "bytecode": "OP_OVER 2202 OP_GREATERTHAN OP_VERIFY OP_3 OP_PICK 2202 OP_GREATERTHAN OP_VERIFY OP_DUP OP_3 OP_PICK OP_EQUAL OP_NOT OP_VERIFY OP_TXINPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_2 OP_NUMEQUALVERIFY e803 OP_INPUTINDEX OP_UTXOVALUE OP_3 OP_PICK OP_6 OP_PICK OP_ADD OP_ROT OP_ADD OP_NUMEQUALVERIFY 76a914 OP_SWAP OP_CAT 88ac OP_CAT 76a914 OP_3 OP_ROLL OP_CAT 88ac OP_CAT OP_0 OP_OUTPUTBYTECODE OP_ROT OP_EQUALVERIFY OP_1 OP_OUTPUTBYTECODE OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_NUMEQUALVERIFY OP_1 OP_OUTPUTVALUE OP_NUMEQUAL",
+  "source": "pragma cashscript ^0.14.0;\n\ncontract SplitRouter(\n    bytes20 recipient1,\n    int amount1,\n    bytes20 recipient2,\n    int amount2\n) {\n    function distribute() {\n        require(amount1 > 546);\n        require(amount2 > 546);\n        require(recipient1 != recipient2);\n\n        require(tx.inputs.length == 1);\n        require(tx.outputs.length == 2);\n\n        int minerFee = 1000;\n        int contractBalance =\n            tx.inputs[this.activeInputIndex].value;\n\n        require(\n            contractBalance == amount1 + amount2 + minerFee\n        );\n\n        bytes25 recipient1LockingBytecode =\n            new LockingBytecodeP2PKH(recipient1);\n\n        bytes25 recipient2LockingBytecode =\n            new LockingBytecodeP2PKH(recipient2);\n\n        require(\n            tx.outputs[0].lockingBytecode ==\n            recipient1LockingBytecode\n        );\n\n        require(\n            tx.outputs[1].lockingBytecode ==\n            recipient2LockingBytecode\n        );\n\n        require(tx.outputs[0].value == amount1);\n        require(tx.outputs[1].value == amount2);\n    }\n}",
+  "fingerprint": "e9de7f52921844fc92cffa1c3b9a654c57364b4284221ab954f714b4df5200c6",
+  "debug": {
+    "bytecode": "78022202a0695379022202a069765379879169c3519dc4529d02e803c0c653795679937b939d0376a9147c7e0288ac7e0376a914537a7e0288ac7e00cd7b8851cd8800cc9d51cc9c",
+    "sourceMap": "10:16:10:23;:26::29;:16:::1;:8::31;11:16:11:23:0;;:26::29;:16:::1;:8::31;12:16:12:26:0;:30::40;;:16:::1;;:8::42;14:16:14:32:0;:36::37;:8::39:1;15:16:15:33:0;:37::38;:8::40:1;17:23:17:27:0;19:22:19:43;:12::50:1;22:31:22:38:0;;:41::48;;:31:::1;:51::59:0;:31:::1;21:8:23:10;26:12:26:48:0;:37::47;:12::48:1;;;29::29::0;:37::47;;:12::48:1;;;32:23:32:24:0;:12::41:1;33::33:37:0;31:8:34:10:1;37:23:37:24:0;:12::41:1;36:8:39:10;41:27:41:28:0;:16::35:1;:8::48;42:27:42:28:0;:16::35:1;:8::48",
+    "logs": [],
+    "requires": [
+      { "ip": 7, "line": 10 },
+      { "ip": 12, "line": 11 },
+      { "ip": 18, "line": 12 },
+      { "ip": 21, "line": 14 },
+      { "ip": 24, "line": 15 },
+      { "ip": 35, "line": 21 },
+      { "ip": 50, "line": 31 },
+      { "ip": 53, "line": 36 },
+      { "ip": 56, "line": 41 },
+      { "ip": 60, "line": 42 }
+    ]
+  },
+  "compiler": {
+    "name": "cashc",
+    "version": "0.14.0",
+    "options": {
+      "enforceFunctionParameterTypes": true,
+      "enforceLocktimeGuard": true
+    }
+  },
+  "updatedAt": "2026-11-21T07:46:03.570Z"
+}

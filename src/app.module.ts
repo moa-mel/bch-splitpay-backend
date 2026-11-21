@@ -4,6 +4,9 @@ import { HealthController } from './health/health.controller';
 import { SplitsModule } from './modules/splits/splits.module';
 import { GroupsModule } from './modules/groups/groups.module';
 import { ConfigModule } from '@nestjs/config';
+import { InvitationsModule } from './modules/invitations/invitations.module';
+import { BlockchainModule } from './modules/blockchain/blockchain.module';
+import { ContractsModule } from './modules/contracts/contracts.module';
 
 @Module({
   imports: [
@@ -13,7 +16,10 @@ import { ConfigModule } from '@nestjs/config';
     }),
     PrismaModule,
     SplitsModule,
-     GroupsModule
+     GroupsModule,
+     ContractsModule,
+    BlockchainModule,
+    InvitationsModule,
   ],
   controllers: [HealthController],
 })

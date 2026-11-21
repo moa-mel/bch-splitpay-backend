@@ -1,0 +1,44 @@
+pragma cashscript ^0.14.0;
+
+contract SplitRouter(
+    bytes20 recipient1,
+    int amount1,
+    bytes20 recipient2,
+    int amount2
+) {
+    function distribute() {
+        require(amount1 > 546);
+        require(amount2 > 546);
+        require(recipient1 != recipient2);
+
+        require(tx.inputs.length == 1);
+        require(tx.outputs.length == 2);
+
+        int minerFee = 1000;
+        int contractBalance =
+            tx.inputs[this.activeInputIndex].value;
+
+        require(
+            contractBalance == amount1 + amount2 + minerFee
+        );
+
+        bytes25 recipient1LockingBytecode =
+            new LockingBytecodeP2PKH(recipient1);
+
+        bytes25 recipient2LockingBytecode =
+            new LockingBytecodeP2PKH(recipient2);
+
+        require(
+            tx.outputs[0].lockingBytecode ==
+            recipient1LockingBytecode
+        );
+
+        require(
+            tx.outputs[1].lockingBytecode ==
+            recipient2LockingBytecode
+        );
+
+        require(tx.outputs[0].value == amount1);
+        require(tx.outputs[1].value == amount2);
+    }
+}
