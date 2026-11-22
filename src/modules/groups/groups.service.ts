@@ -1,3 +1,4 @@
+
 import {
   Injectable,
   NotFoundException,
@@ -10,6 +11,32 @@ import { TransactionVerifierService } from '../blockchain/transaction-verifier.s
 
 import { CreateContributionDto } from './dto/create-contribution.dto';
 import { CreateGroupDto } from './dto/create-group.dto';
+
+type DecimalLike = {
+  toString(): string;
+};
+
+type GroupWithContributions = {
+  targetAmount: DecimalLike;
+  contributions?: Array<{
+    amount: DecimalLike;
+  }>;
+};
+
+function serializeGroup<T extends GroupWithContributions>(
+  group: T,
+) {
+  return {
+    ...group,
+    targetAmount: group.targetAmount.toString(),
+    contributions: group.contributions?.map(
+      (contribution) => ({
+        ...contribution,
+        amount: contribution.amount.toString(),
+      }),
+    ),
+  };
+}
 
 function toSatoshis(amount: string): bigint {
   const [whole, fraction = ''] = amount.split('.');
@@ -26,7 +53,7 @@ export class GroupsService {
     private readonly prisma: PrismaService,
     private readonly groupVault: GroupVaultService,
     private readonly verifier: TransactionVerifierService,
-  ) { }
+  ) {}
 
   async create(dto: CreateGroupDto) {
     if (!dto.creatorAddress) {
@@ -53,10 +80,11 @@ export class GroupsService {
       beneficiaryAddress: group.creatorAddress!,
     });
 
-    const contract = await this.groupVault.getContractAddress(plan);
+    const contract =
+      await this.groupVault.getContractAddress(plan);
 
     return {
-      ...group,
+      ...serializeGroup(group),
       vaultAddress: contract.contractAddress,
       network: contract.network,
       requiredFundingSatoshis:
@@ -77,7 +105,7 @@ export class GroupsService {
     return Promise.all(
       groups.map(async (group) => {
         if (!group.creatorAddress) {
-          return group;
+          return serializeGroup(group);
         }
 
         const plan = this.groupVault.prepare({
@@ -90,7 +118,7 @@ export class GroupsService {
           await this.groupVault.getContractAddress(plan);
 
         return {
-          ...group,
+          ...serializeGroup(group),
           vaultAddress: contract.contractAddress,
           network: contract.network,
           requiredFundingSatoshis:
@@ -130,30 +158,6 @@ export class GroupsService {
       );
     }
 
-    const plan = this.groupVault.prepare({
-      groupId: group.id,
-      targetAmountBch: group.targetAmount.toString(),
-      beneficiaryAddress: group.creatorAddress,
-    });
-
-    const contract = await this.groupVault.getContractAddress(plan);
-
-    const amountSatoshis = toSatoshis(
-      dto.amount.toFixed(8),
-    );
-
-    const payment = await this.verifier.verifyPaymentOutput(
-      dto.transactionId,
-      contract.contractAddress,
-      amountSatoshis,
-    );
-
-    if (!payment.paymentMatches) {
-      throw new BadRequestException(
-        'The transaction does not pay the expected amount to this GroupVault.',
-      );
-    }
-
     const existing = await this.prisma.contribution.findFirst({
       where: {
         groupId,
@@ -167,14 +171,46 @@ export class GroupsService {
       );
     }
 
-    return this.prisma.contribution.create({
-      data: {
-        groupId,
-        contributor: dto.contributor,
-        amount: dto.amount,
-        transactionId: dto.transactionId,
-        confirmed: payment.confirmations > 0,
-      },
+    const plan = this.groupVault.prepare({
+      groupId: group.id,
+      targetAmountBch: group.targetAmount.toString(),
+      beneficiaryAddress: group.creatorAddress,
     });
+
+    const contract =
+      await this.groupVault.getContractAddress(plan);
+
+    const amountSatoshis = toSatoshis(
+      dto.amount.toFixed(8),
+    );
+
+    const payment =
+      await this.verifier.verifyPaymentOutput(
+        dto.transactionId,
+        contract.contractAddress,
+        amountSatoshis,
+      );
+
+    if (!payment.paymentMatches) {
+      throw new BadRequestException(
+        `The transaction paid ${payment.paidSatoshis} satoshis to the GroupVault, but ${payment.expectedSatoshis} satoshis were expected.`,
+      );
+    }
+
+    const contribution =
+      await this.prisma.contribution.create({
+        data: {
+          groupId,
+          contributor: dto.contributor,
+          amount: dto.amount,
+          transactionId: dto.transactionId,
+          confirmed: payment.confirmations > 0,
+        },
+      });
+
+    return {
+      ...contribution,
+      amount: contribution.amount.toString(),
+    };
   }
 }

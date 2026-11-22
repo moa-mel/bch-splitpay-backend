@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import WebSocket, { RawData } from 'ws';
 
 interface ElectrumResponse<T> {
-  id: number;
+  id?: number | null;
   result?: T;
   error?: {
     code: number;
@@ -62,6 +62,16 @@ export class NetworkProvider {
           [],
         );
 
+        if (
+          !header ||
+          typeof header.height !== 'number' ||
+          !Number.isFinite(header.height)
+        ) {
+          throw new ServiceUnavailableException(
+            'Electrum returned an invalid blockchain height.',
+          );
+        }
+
         return header.height as T;
       }
 
@@ -78,8 +88,9 @@ export class NetworkProvider {
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       let settled = false;
+      let socket: WebSocket | undefined;
+
       const requestId = 1;
-      let socket: WebSocket;
 
       const finish = (
         error?: Error,
@@ -90,7 +101,10 @@ export class NetworkProvider {
         settled = true;
         clearTimeout(timeout);
 
-        if (socket?.readyState === WebSocket.OPEN) {
+        if (
+          socket &&
+          socket.readyState === WebSocket.OPEN
+        ) {
           socket.close();
         }
 
@@ -98,6 +112,38 @@ export class NetworkProvider {
           reject(error);
         } else {
           resolve(value as T);
+        }
+      };
+
+      const sendRequest = (
+        id: number,
+        requestMethod: string,
+        requestParams: unknown[],
+      ) => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          finish(
+            new ServiceUnavailableException(
+              'The BCH Electrum connection is not ready.',
+            ),
+          );
+          return;
+        }
+
+        try {
+          socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id,
+              method: requestMethod,
+              params: requestParams,
+            }),
+          );
+        } catch {
+          finish(
+            new ServiceUnavailableException(
+              'Unable to send a request to the BCH Electrum server.',
+            ),
+          );
         }
       };
 
@@ -121,14 +167,10 @@ export class NetworkProvider {
       }
 
       socket.on('open', () => {
-        socket.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: 0,
-            method: 'server.version',
-            params: ['SplitPay', '1.4'],
-          }),
-        );
+        sendRequest(0, 'server.version', [
+          'SplitPay',
+          '1.4',
+        ]);
       });
 
       socket.on('message', (data: RawData) => {
@@ -141,35 +183,27 @@ export class NetworkProvider {
         } catch {
           finish(
             new ServiceUnavailableException(
-              'Electrum returned an invalid response.',
+              'Electrum returned an invalid JSON response.',
             ),
           );
           return;
         }
 
-        // Protocol negotiation response.
         if (message.id === 0) {
           if (message.error) {
             finish(
               new ServiceUnavailableException(
-                `Electrum negotiation failed: ${message.error.message}`,
+                `Electrum protocol negotiation failed: ${message.error.message}`,
               ),
             );
             return;
           }
 
-          socket.send(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: requestId,
-              method,
-              params,
-            }),
-          );
-
+          sendRequest(requestId, method, params);
           return;
         }
 
+        // Ignore notifications and responses to unrelated request IDs.
         if (message.id !== requestId) return;
 
         if (message.error) {
@@ -183,7 +217,7 @@ export class NetworkProvider {
 
         if (message.result === undefined) {
           finish(
-            new InternalServerErrorException(
+            new ServiceUnavailableException(
               'Electrum returned an empty result.',
             ),
           );
