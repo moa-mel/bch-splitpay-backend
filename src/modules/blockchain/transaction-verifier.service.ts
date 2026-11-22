@@ -8,12 +8,6 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 
-import {
-  cashAddressToLockingBytecode,
-  decodeTransaction,
-  hexToBin,
-} from '@bitauth/libauth';
-
 import { NetworkProvider } from './network.provider';
 
 interface InspectedTransaction {
@@ -24,21 +18,386 @@ interface InspectedTransaction {
   confirmed: boolean;
 }
 
-function equalBytes(
-  left: Uint8Array,
-  right: Uint8Array,
-): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
+interface TransactionOutput {
+  lockingBytecode: Buffer;
+  valueSatoshis: bigint;
+}
 
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
+const CASHADDR_CHARSET =
+  'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+
+const CASHADDR_GENERATORS = [
+  0x98f2bc8e61n,
+  0x79b76d99e2n,
+  0xf33e5fb3c4n,
+  0xae2eabe2a8n,
+  0x1e4f43e470n,
+];
+
+const CASHADDR_SIZE_BITS = [
+  20, 24, 28, 32, 40, 48, 56, 64,
+];
+
+function cashAddressPolymod(values: number[]): bigint {
+  let checksum = 1n;
+
+  for (const value of values) {
+    const top = checksum >> 35n;
+
+    checksum =
+      ((checksum & 0x07ffffffffn) << 5n) ^
+      BigInt(value);
+
+    for (let index = 0; index < 5; index += 1) {
+      if (((top >> BigInt(index)) & 1n) !== 0n) {
+        checksum ^= CASHADDR_GENERATORS[index];
+      }
     }
   }
 
-  return true;
+  return checksum;
+}
+
+function convertBits(
+  values: number[],
+  fromBits: number,
+  toBits: number,
+  pad: boolean,
+): number[] {
+  let accumulator = 0;
+  let bitCount = 0;
+
+  const result: number[] = [];
+  const maxValue = (1 << toBits) - 1;
+  const maxAccumulator =
+    (1 << (fromBits + toBits - 1)) - 1;
+
+  for (const value of values) {
+    if (
+      value < 0 ||
+      (value >> fromBits) !== 0
+    ) {
+      throw new Error('Invalid CashAddress data.');
+    }
+
+    accumulator =
+      ((accumulator << fromBits) | value) &
+      maxAccumulator;
+
+    bitCount += fromBits;
+
+    while (bitCount >= toBits) {
+      bitCount -= toBits;
+
+      result.push(
+        (accumulator >> bitCount) & maxValue,
+      );
+    }
+  }
+
+  if (pad) {
+    if (bitCount > 0) {
+      result.push(
+        (accumulator << (toBits - bitCount)) &
+          maxValue,
+      );
+    }
+  } else if (
+    bitCount >= fromBits ||
+    ((accumulator << (toBits - bitCount)) &
+      maxValue) !== 0
+  ) {
+    throw new Error('Invalid CashAddress padding.');
+  }
+
+  return result;
+}
+
+function cashAddressToLockingBytecode(
+  address: string,
+): Buffer {
+  const separator = address.lastIndexOf(':');
+
+  if (separator < 1) {
+    throw new Error('CashAddress prefix is missing.');
+  }
+
+  const prefix = address.slice(0, separator).toLowerCase();
+  const encoded = address.slice(separator + 1).toLowerCase();
+
+  if (prefix !== 'bchtest') {
+    throw new Error(
+      'The address is not a BCH Chipnet CashAddress.',
+    );
+  }
+
+  const values = [...encoded].map((character) => {
+    const value = CASHADDR_CHARSET.indexOf(character);
+
+    if (value === -1) {
+      throw new Error('Invalid CashAddress character.');
+    }
+
+    return value;
+  });
+
+  if (values.length < 9) {
+    throw new Error('CashAddress is too short.');
+  }
+
+  const prefixValues = [
+    ...[...prefix].map(
+      (character) => character.charCodeAt(0) & 31,
+    ),
+    0,
+  ];
+
+  if (
+    cashAddressPolymod([
+      ...prefixValues,
+      ...values,
+    ]) !== 1n
+  ) {
+    throw new Error('CashAddress checksum is invalid.');
+  }
+
+  const payload = convertBits(
+    values.slice(0, -8),
+    5,
+    8,
+    false,
+  );
+
+  if (payload.length < 2) {
+    throw new Error('CashAddress payload is invalid.');
+  }
+
+  const version = payload[0];
+
+  if ((version & 0x80) !== 0) {
+    throw new Error('CashAddress version is invalid.');
+  }
+
+  const type = (version >> 3) & 0x0f;
+  const sizeIndex = version & 7;
+
+  const hash = Buffer.from(payload.slice(1));
+
+  if (hash.length !== CASHADDR_SIZE_BITS[sizeIndex]) {
+    throw new Error('CashAddress hash length is invalid.');
+  }
+
+  if (type === 0) {
+    // Pay-to-public-key-hash (P2PKH).
+    return Buffer.concat([
+      Buffer.from([0x76, 0xa9, 0x14]),
+      hash,
+      Buffer.from([0x88, 0xac]),
+    ]);
+  }
+
+  if (type === 1) {
+    // Pay-to-script-hash (P2SH).
+    return Buffer.concat([
+      Buffer.from([0xa9, 0x14]),
+      hash,
+      Buffer.from([0x87]),
+    ]);
+  }
+
+  throw new Error(
+    `Unsupported CashAddress type: ${type}`,
+  );
+}
+
+function readCompactSize(
+  buffer: Buffer,
+  state: { offset: number },
+): bigint {
+  if (state.offset >= buffer.length) {
+    throw new Error('Unexpected end of transaction.');
+  }
+
+  const prefix = buffer[state.offset++];
+
+  if (prefix < 0xfd) {
+    return BigInt(prefix);
+  }
+
+  if (prefix === 0xfd) {
+    if (state.offset + 2 > buffer.length) {
+      throw new Error('Invalid transaction length.');
+    }
+
+    const value = buffer.readUInt16LE(state.offset);
+    state.offset += 2;
+
+    return BigInt(value);
+  }
+
+  if (prefix === 0xfe) {
+    if (state.offset + 4 > buffer.length) {
+      throw new Error('Invalid transaction length.');
+    }
+
+    const value = buffer.readUInt32LE(state.offset);
+    state.offset += 4;
+
+    return BigInt(value);
+  }
+
+  if (state.offset + 8 > buffer.length) {
+    throw new Error('Invalid transaction length.');
+  }
+
+  const value = buffer.readBigUInt64LE(state.offset);
+  state.offset += 8;
+
+  return value;
+}
+
+function decodeTransactionOutputs(
+  rawTransaction: string,
+): TransactionOutput[] {
+  const buffer = Buffer.from(rawTransaction, 'hex');
+
+  if (buffer.length < 10) {
+    throw new Error('Raw transaction is too short.');
+  }
+
+  const state = { offset: 0 };
+
+  // Version.
+  state.offset += 4;
+
+  // SegWit marker and flag, if present.
+  let hasWitness = false;
+
+  if (
+    buffer[state.offset] === 0x00 &&
+    buffer[state.offset + 1] !== 0x00
+  ) {
+    hasWitness = true;
+    state.offset += 2;
+  }
+
+  // Inputs.
+  const inputCount = readCompactSize(buffer, state);
+
+  if (inputCount > BigInt(buffer.length)) {
+    throw new Error('Invalid transaction input count.');
+  }
+
+  for (
+    let index = 0n;
+    index < inputCount;
+    index += 1n
+  ) {
+    // Previous transaction hash and output index.
+    state.offset += 36;
+
+    const scriptLength = Number(
+      readCompactSize(buffer, state),
+    );
+
+    state.offset += scriptLength;
+
+    // Sequence.
+    state.offset += 4;
+
+    if (state.offset > buffer.length) {
+      throw new Error('Invalid transaction input.');
+    }
+  }
+
+  // Outputs.
+  const outputCount = readCompactSize(buffer, state);
+
+  if (outputCount > BigInt(buffer.length)) {
+    throw new Error('Invalid transaction output count.');
+  }
+
+  const outputs: TransactionOutput[] = [];
+
+  for (
+    let index = 0n;
+    index < outputCount;
+    index += 1n
+  ) {
+    if (state.offset + 8 > buffer.length) {
+      throw new Error('Invalid transaction output value.');
+    }
+
+    const valueSatoshis =
+      buffer.readBigUInt64LE(state.offset);
+
+    state.offset += 8;
+
+    const scriptLength = Number(
+      readCompactSize(buffer, state),
+    );
+
+    if (
+      !Number.isSafeInteger(scriptLength) ||
+      scriptLength < 0 ||
+      state.offset + scriptLength > buffer.length
+    ) {
+      throw new Error('Invalid transaction output script.');
+    }
+
+    const lockingBytecode = buffer.subarray(
+      state.offset,
+      state.offset + scriptLength,
+    );
+
+    state.offset += scriptLength;
+
+    outputs.push({
+      lockingBytecode,
+      valueSatoshis,
+    });
+  }
+
+  // Skip witness data after outputs.
+  if (hasWitness) {
+    for (
+      let index = 0n;
+      index < inputCount;
+      index += 1n
+    ) {
+      const itemCount = readCompactSize(buffer, state);
+
+      for (
+        let item = 0n;
+        item < itemCount;
+        item += 1n
+      ) {
+        const itemLength = Number(
+          readCompactSize(buffer, state),
+        );
+
+        state.offset += itemLength;
+
+        if (state.offset > buffer.length) {
+          throw new Error('Invalid transaction witness.');
+        }
+      }
+    }
+  }
+
+  // Four-byte locktime must remain.
+  if (state.offset + 4 !== buffer.length) {
+    throw new Error('Transaction structure is invalid.');
+  }
+
+  return outputs;
+}
+
+function equalBytes(
+  left: Buffer,
+  right: Buffer,
+): boolean {
+  return left.equals(right);
 }
 
 @Injectable()
@@ -59,17 +418,13 @@ export class TransactionVerifierService {
     transactionId: string,
   ): Promise<{
     transaction: InspectedTransaction;
-    outputs: Array<{
-      lockingBytecode: Uint8Array;
-      valueSatoshis: bigint;
-    }>;
+    outputs: TransactionOutput[];
   }> {
     this.validateTransactionId(transactionId);
 
     let rawTransaction: string;
 
     try {
-      // Electrum returns serialized transaction hex when verbose is false.
       rawTransaction =
         await this.networkProvider.call<string>(
           'getrawtransaction',
@@ -102,17 +457,19 @@ export class TransactionVerifierService {
       !/^(?:[a-fA-F0-9]{2})+$/.test(rawTransaction)
     ) {
       throw new ServiceUnavailableException(
-        'Electrum did not return valid raw transaction hex. Check that the configured server supports blockchain.transaction.get.',
+        'Electrum did not return valid raw transaction hex.',
       );
     }
 
-    const decoded = decodeTransaction(
-      hexToBin(rawTransaction),
-    );
+    let outputs: TransactionOutput[];
 
-    if (typeof decoded === 'string') {
+    try {
+      outputs = decodeTransactionOutputs(rawTransaction);
+    } catch (error) {
       throw new InternalServerErrorException(
-        `Unable to decode the BCH transaction: ${decoded}`,
+        `Unable to decode BCH transaction outputs: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
       );
     }
 
@@ -145,7 +502,6 @@ export class TransactionVerifierService {
       );
     }
 
-    // Electrum reports height 0 for a transaction in the mempool.
     const confirmations =
       transactionHeight > 0
         ? Math.max(0, tipHeight - transactionHeight + 1)
@@ -164,10 +520,7 @@ export class TransactionVerifierService {
         status: confirmed ? 'CONFIRMED' : 'UNCONFIRMED',
         confirmed,
       },
-      outputs: decoded.outputs.map((output) => ({
-        lockingBytecode: output.lockingBytecode,
-        valueSatoshis: output.valueSatoshis,
-      })),
+      outputs,
     };
   }
 
@@ -194,18 +547,16 @@ export class TransactionVerifierService {
       );
     }
 
-    if (!expectedAddress) {
-      throw new BadRequestException(
-        'A GroupVault address is required for payment verification.',
-      );
-    }
+    let expectedBytecode: Buffer;
 
-    const expectedOutput =
-      cashAddressToLockingBytecode(expectedAddress);
-
-    if (typeof expectedOutput === 'string') {
+    try {
+      expectedBytecode =
+        cashAddressToLockingBytecode(expectedAddress);
+    } catch (error) {
       throw new BadRequestException(
-        `Invalid GroupVault CashAddress: ${expectedOutput}`,
+        `Invalid GroupVault CashAddress: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
       );
     }
 
@@ -215,16 +566,12 @@ export class TransactionVerifierService {
 
     const paidSatoshis = inspected.outputs.reduce(
       (total, output) => {
-        if (
-          equalBytes(
-            output.lockingBytecode,
-            expectedOutput.bytecode,
-          )
-        ) {
-          return total + output.valueSatoshis;
-        }
-
-        return total;
+        return equalBytes(
+          output.lockingBytecode,
+          expectedBytecode,
+        )
+          ? total + output.valueSatoshis
+          : total;
       },
       0n,
     );
